@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 cross_modal.egg-info/PKG-INFO
 cross_modal.egg-info/SOURCES.txt
@@ -6,7 +7,7 @@ cross_modal.egg-info/requires.txt
 cross_modal.egg-info/top_level.txt
 data/__init__.py
 data/dataset.py
-data/toy_dataset.py
+data/dataset_simple.py
 nn/deeponet.py
 nn/fnn.py
 nn/module.py

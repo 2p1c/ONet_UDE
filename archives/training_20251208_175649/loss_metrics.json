@@ -1,0 +1,8 @@
+{
+  "best_test_loss": "0.010993",
+  "final_train_loss": "0.009255",
+  "final_test_loss": "0.010993",
+  "n_epochs": 100,
+  "train_losses_length": 100,
+  "test_losses_length": 100
+}
