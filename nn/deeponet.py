@@ -24,6 +24,7 @@ class DeepONet(StructureNN):
         width=50,
         activation="relu",
         initializer="Glorot normal",
+        dropout=0.1,  # 【新增】Dropout率
     ):
         super(DeepONet, self).__init__()
         self.branch_dim = branch_dim
@@ -33,6 +34,7 @@ class DeepONet(StructureNN):
         self.width = width
         self.activation = activation
         self.initializer = initializer
+        self.dropout = dropout  # 【新增】
 
         self.modus = self.__init_modules()
         self.params = self.__init_params()
@@ -41,10 +43,19 @@ class DeepONet(StructureNN):
     def forward(self, x):
         x_branch, x_trunk = x[..., : self.branch_dim], x[..., self.branch_dim :]
         x_branch = self.modus["Branch"](x_branch)
+
+        # 【新增】Branch 输出后添加 Dropout
+        if self.training and self.dropout > 0:
+            x_branch = self.modus["Dropout"](x_branch)
+
         for i in range(1, self.trunk_depth):
             x_trunk = self.modus["TrActM{}".format(i)](
                 self.modus["TrLinM{}".format(i)](x_trunk)
             )
+            # 【新增】Trunk 每层后添加 Dropout
+            if self.training and self.dropout > 0 and i < self.trunk_depth - 1:
+                x_trunk = self.modus["Dropout"](x_trunk)
+
         # 关键创新
         return torch.sum(x_branch * x_trunk, dim=-1, keepdim=True) + self.params["bias"]
 
@@ -59,6 +70,11 @@ class DeepONet(StructureNN):
             self.activation,
             self.initializer,
         )
+
+        # 【新增】Dropout 层
+        if self.dropout > 0:
+            modules["Dropout"] = nn.Dropout(self.dropout)
+
         # trunk net
         # 第1层
         modules["TrLinM1"] = nn.Linear(self.trunk_dim, self.width)

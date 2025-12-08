@@ -23,6 +23,7 @@ plt.rcParams['figure.max_open_warning'] = 50
 
 # Use correct import path
 from data.dataset import ToyUSDataset3D, batch_spectrogram_3d
+from data.dataset_simple import SimpleUSDataset3D  # 新增导入
 
 
 def test_dataset_3d_basic():
@@ -249,6 +250,128 @@ def visualize_3d_dataset():
     print("✅ Visualization complete!\n")
 
 
+def test_simple_dataset_basic():
+    """测试简化数据集基本功能"""
+    print("=" * 60)
+    print("Test: Simple Dataset Basic Functionality")
+    print("=" * 60)
+    
+    dataset = SimpleUSDataset3D(
+        n_samples=10,
+        nx=5,
+        ny=5,
+        sig_len=50,
+        img_size=10,
+        precompute=True
+    )
+    
+    # 检查长度
+    assert len(dataset) == 10, f"Expected 10 samples, got {len(dataset)}"
+    print(f"✓ Dataset length: {len(dataset)}")
+    
+    # 检查单个样本
+    sig, img = dataset[0]
+    assert sig.shape == (5, 5, 50), f"Signal shape error: {sig.shape}"
+    assert img.shape == (10, 10), f"Image shape error: {img.shape}"
+    print(f"✓ Sample shapes: signal{sig.shape}, image{img.shape}")
+    
+    # 检查值域
+    assert sig.min() >= -1 and sig.max() <= 1, "Signal values out of range"
+    assert img.min() >= 0 and img.max() <= 1, "Image values out of range"
+    print(f"✓ Value ranges: sig[{sig.min():.3f}, {sig.max():.3f}], img[{img.min():.3f}, {img.max():.3f}]")
+    
+    # 数据集信息
+    info = dataset.get_info()
+    print(f"✓ Dataset info: {info}")
+    
+    print("✅ Simple dataset test passed!\n")
+
+
+def visualize_simple_dataset():
+    """可视化简化数据集"""
+    print("=" * 60)
+    print("Visualization: Simple Dataset Analysis")
+    print("=" * 60)
+    
+    # 创建数据集
+    dataset = SimpleUSDataset3D(
+        n_samples=1,
+        nx=5,
+        ny=5,
+        sig_len=50,
+        img_size=10,
+        max_defects=2,
+        precompute=True
+    )
+    
+    sig, img = dataset[0]
+    print(f"Data shapes: signal{sig.shape}, image{img.shape}")
+    
+    # 创建图形
+    fig = plt.figure(figsize=(16, 5))
+    
+    # ===== 1. 某个点的时域波形 =====
+    ax1 = plt.subplot(1, 3, 1)
+    sample_y, sample_x = 2, 2  # 中心点
+    time_signal = sig[sample_y, sample_x, :]
+    t_vec = np.linspace(0, dataset.T, dataset.sig_len)
+    ax1.plot(t_vec * 1e6, time_signal, linewidth=1.2, color='steelblue')
+    ax1.set_xlabel('Time (μs)', fontsize=11)
+    ax1.set_ylabel('Amplitude', fontsize=11)
+    ax1.set_title(f'Time Signal at Point ({sample_x}, {sample_y})', fontsize=12, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    ax1.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.5)
+    
+    # ===== 2. 空间分布 (某时刻) =====
+    ax2 = plt.subplot(1, 3, 2)
+    time_idx = 8  # 中间时刻
+    spatial_snapshot = sig[:, :, time_idx]
+    
+    # 4倍插值
+    from scipy.ndimage import zoom
+    spatial_interp = zoom(spatial_snapshot, 4, order=1)
+    
+    im2 = ax2.imshow(spatial_interp, cmap='seismic',
+                     extent=[0, dataset.L * 1000, 0, dataset.L * 1000],
+                     origin='lower', aspect='equal',
+                     vmin=-1, vmax=1)
+    ax2.set_xlabel('x (mm)', fontsize=11)
+    ax2.set_ylabel('y (mm)', fontsize=11)
+    ax2.set_title(f'Spatial Distribution at t={t_vec[time_idx]*1e6:.1f}μs', fontsize=12, fontweight='bold')
+    plt.colorbar(im2, ax=ax2, label='Amplitude', shrink=0.8)
+    
+    # 标记激励源位置
+    ax2.plot(dataset.src_x * 1000, dataset.src_y * 1000, 'g*', markersize=15, label='Source')
+    # 标记测点
+    x_sensors = np.linspace(0, dataset.L, dataset.nx) * 1000
+    y_sensors = np.linspace(0, dataset.L, dataset.ny) * 1000
+    xv_s, yv_s = np.meshgrid(x_sensors, y_sensors)
+    ax2.plot(xv_s.flatten(), yv_s.flatten(), 'ko', markersize=4, label='Sensors')
+    ax2.legend(fontsize=9)
+    
+    # ===== 3. 损伤概率图 =====
+    ax3 = plt.subplot(1, 3, 3)
+    im3 = ax3.imshow(img, cmap='hot', vmin=0, vmax=1,
+                     extent=[0, 100, 0, 100],
+                     origin='lower', aspect='equal')
+    ax3.set_xlabel('x (mm)', fontsize=11)
+    ax3.set_ylabel('y (mm)', fontsize=11)
+    ax3.set_title('Damage Probability Map', fontsize=12, fontweight='bold')
+    plt.colorbar(im3, ax=ax3, label='Probability', shrink=0.8)
+    
+    plt.suptitle('Simple Dataset Visualization (5×5×50 → 10×10)', 
+                 fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    
+    # 保存图像
+    os.makedirs('images', exist_ok=True)
+    plt.savefig('images/dataset_simple_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_simple_visualization.png")
+    plt.show()
+    
+    print("✅ Simple dataset visualization complete!\n")
+
+
 def run_all_tests():
     """Run all tests"""
     print("\n" + "=" * 60)
@@ -261,6 +384,10 @@ def run_all_tests():
         
         # Visualization test
         visualize_3d_dataset()
+        
+        # 【新增】简化数据集测试
+        test_simple_dataset_basic()
+        visualize_simple_dataset()
         
         print("=" * 60)
         print("🎉 All tests passed! 3D dataset integration successful!")
