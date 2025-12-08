@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# Data files (but keep Python scripts in data/)
+data/*.h5
+data/*.hdf5
+data/*.npy
+data/*.npz
+data/*.pkl
+data/*.pickle
+data/*.csv
+data/*.json
+data/*.xml
+data/*.txt
+data/**/*.h5
+data/**/*.hdf5
+data/**/*.npy
+data/**/*.npz
+data/**/*.pkl
+data/**/*.pickle
+data/**/*.csv
+data/**/*.json
+data/**/*.xml
+data/**/*.txt
+
+# Keep Python files in data/
+!data/**/*.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+

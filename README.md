@@ -7,5 +7,6 @@ pip install uv
 
 ### 训练模型
 ```bash
+uv sync
 uv run python script/train.py
 ```
