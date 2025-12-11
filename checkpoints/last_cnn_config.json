@@ -1,0 +1,20 @@
+{
+  "n_samples": 2000,
+  "train_ratio": 0.8,
+  "nx": 5,
+  "ny": 5,
+  "sig_len": 100,
+  "img_size": 10,
+  "input_channels": 100,
+  "hidden_channels": 64,
+  "dropout": 0.15,
+  "batch_size": 128,
+  "epochs": 100,
+  "lr": 0.0005,
+  "weight_decay": 0.0001,
+  "early_stopping": true,
+  "patience": 20,
+  "use_scheduler": true,
+  "scheduler_patience": 5,
+  "scheduler_factor": 0.5
+}
