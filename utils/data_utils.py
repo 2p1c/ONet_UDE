@@ -56,7 +56,7 @@ class DeepONetDataset(Dataset):
                     self.targets.append(target_val)
 
             # 进度显示
-            if verbose and (count % 5 == 0 or count == len(sample_indices)):
+            if verbose and (count % 100 == 0 or count == len(sample_indices)):
                 print(f"  Progress: {count}/{len(sample_indices)} samples processed")
 
         # 转换为numpy数组

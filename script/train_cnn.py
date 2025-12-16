@@ -16,76 +16,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import torch.nn as nn
 import json
-import argparse  # 新增
+import argparse
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.ndimage import zoom
 
 from data.dataset_simple import SimpleUSDataset3D
 from data.transform import create_square_cropped_dataset  # 新增
 from nn.cnn import SimpleCNN
 from utils.data_utils import prepare_cnn_dataloaders
 from utils.train_utils import train_model
-from utils.visualization import plot_loss_curves, visualize_prediction
-
-
-def visualize_cnn_prediction(model, raw_dataset, sample_idx, device, save_path='images/cnn_prediction.png'):
-    """
-    CNN专用可视化函数
-    
-    Args:
-        model: CNN模型
-        raw_dataset: 原始数据集
-        sample_idx: 样本索引
-        device: 设备
-        save_path: 保存路径
-    """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    
-    model.eval()
-    
-    # 获取原始样本
-    sig, img_true = raw_dataset[sample_idx]  # (5, 5, 100), (10, 10)
-    
-    # 转换为CNN输入格式
-    sig_cnn = np.transpose(sig, (2, 0, 1))  # (100, 5, 5)
-    sig_tensor = torch.from_numpy(sig_cnn).unsqueeze(0).to(device)  # (1, 100, 5, 5)
-    
-    # 预测
-    with torch.no_grad():
-        pred = model(sig_tensor)  # (1, 1, 10, 10)
-        img_pred = pred.squeeze().cpu().numpy()  # (10, 10)
-    
-    # 绘图
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    
-    # 真实损伤图
-    im0 = axes[0].imshow(img_true, cmap='hot', vmin=0, vmax=1, origin='lower')
-    axes[0].set_title('Ground Truth', fontsize=12, fontweight='bold')
-    axes[0].set_xlabel('x')
-    axes[0].set_ylabel('y')
-    plt.colorbar(im0, ax=axes[0], label='Probability')
-    
-    # 预测损伤图
-    im1 = axes[1].imshow(img_pred, cmap='hot', vmin=0, vmax=1, origin='lower')
-    axes[1].set_title('CNN Prediction', fontsize=12, fontweight='bold')
-    axes[1].set_xlabel('x')
-    axes[1].set_ylabel('y')
-    plt.colorbar(im1, ax=axes[1], label='Probability')
-    
-    # 误差图
-    error = np.abs(img_pred - img_true)
-    im2 = axes[2].imshow(error, cmap='viridis', vmin=0, vmax=0.5, origin='lower')
-    axes[2].set_title(f'Absolute Error (MAE={error.mean():.4f})', fontsize=12, fontweight='bold')
-    axes[2].set_xlabel('x')
-    axes[2].set_ylabel('y')
-    plt.colorbar(im2, ax=axes[2], label='|Error|')
-    
-    plt.suptitle(f'CNN Prediction (Sample {sample_idx})', fontsize=14, fontweight='bold')
-    plt.tight_layout()
-    
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"✓ Prediction visualization saved to {save_path}")
-    plt.close()
+from utils.visualization import (
+    plot_loss_curves,
+    visualize_cnn_prediction,
+    visualize_cropped_dataset_cnn  # 【新增】导入
+)
 
 
 def main():
@@ -100,9 +45,9 @@ def main():
     parser.add_argument(
         '--crop-position',
         type=str,
-        default='boundary',
+        default='center',  # 【修改】默认center
         choices=['center', 'corner', 'boundary', 'random'],
-        help='裁剪位置'
+        help='裁剪位置：center-中心3×3, boundary-边界分散'
     )
     args = parser.parse_args()
     
@@ -165,9 +110,9 @@ def main():
     
     print(f"✓ Base dataset loaded: {len(raw_dataset)} samples")
     
-    # 【新增】根据是否裁剪，包装数据集
+    # 【修改】根据是否裁剪，包装数据集
     cropper = None
-    input_size = config['nx']  # 默认5×5
+    input_size = config['nx']
     
     if args.crop:
         print(f"\n🔪 Applying square crop transform...")
@@ -175,11 +120,20 @@ def main():
             raw_dataset,
             crop_size=3,
             crop_position=args.crop_position,
-            for_cnn=True,  # 保持网格格式
+            for_cnn=True,
             random_seed=42
         )
-        input_size = 3  # 裁剪后3×3
+        input_size = 3
         print(f"✓ Cropped dataset created")
+        
+        # 【修改】调用utils.visualization中的函数
+        print("\n🎨 Generating cropped dataset visualization...")
+        visualize_cropped_dataset_cnn(
+            raw_dataset,
+            cropper,
+            sample_idx=0,
+            save_path='images/dataset_check/cnn_cropped_data.png'
+        )
     else:
         dataset = raw_dataset
         print(f"✓ Using full dataset (no crop)")
@@ -278,9 +232,28 @@ def main():
     # 绘制损失曲线
     plot_loss_curves(train_losses, test_losses, save_path='images/cnn_loss_curve.png')
     
-    # 加载最佳模型并预测
+    # 【修改】加载最佳模型并预测，传递cropper
     model.load_state_dict(torch.load('checkpoints/best_cnn_model.pth'))
-    visualize_cnn_prediction(model, raw_dataset, test_indices[0], device)
+    
+    # 【关键修复】传递cropper给可视化函数
+    visualize_cnn_prediction(
+        model, 
+        raw_dataset,  # 使用原始数据集
+        test_indices[0], 
+        device,
+        save_path='images/cnn_prediction.png',
+        cropper=cropper  # 【新增】传递裁剪器
+    )
+    
+    # 如果使用了裁剪，再次可视化（测试样本）
+    if args.crop and cropper is not None:
+        print("\n🎨 Generating final cropped dataset visualization (test sample)...")
+        visualize_cropped_dataset_cnn(
+            raw_dataset,
+            cropper,
+            sample_idx=test_indices[0],
+            save_path='images/dataset_check/cnn_cropped_test.png'
+        )
     
     # ==================== 总结 ====================
     print("\n" + "=" * 70)

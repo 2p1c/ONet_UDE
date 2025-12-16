@@ -13,7 +13,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import torch.nn as nn
 import json
-import argparse  # 新增
+import argparse
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.ndimage import zoom
 
 from data.dataset_simple import SimpleUSDataset3D
 from data.transform import create_cropped_dataset, create_square_cropped_dataset  # 修改导入
@@ -21,6 +24,222 @@ from nn.deeponet import DeepONet
 from utils.data_utils import prepare_dataloaders
 from utils.train_utils import train_model
 from utils.visualization import plot_loss_curves, visualize_prediction
+
+
+def visualize_cropped_dataset_deeponet(raw_dataset, cropper, sample_idx=0, save_path='images/deeponet_cropped_data.png'):
+    """
+    可视化DeepONet使用的裁剪数据集
+    
+    展示内容：
+    1. 原始 5×5 空间分布（某时刻）
+    2. 裁剪掩码（哪些传感器被保留）
+    3. 裁剪后信号的时域波形（flatten成一维）
+    4. 目标损伤图（不变）
+    
+    Args:
+        raw_dataset: 原始数据集
+        cropper: 裁剪器（SquareCropper）
+        sample_idx: 样本索引
+        save_path: 保存路径
+    """
+    print(f"\n📊 Visualizing cropped dataset for DeepONet...")
+    
+    # 获取原始样本
+    sig_full, img_target = raw_dataset[sample_idx]  # (5, 5, 100), (10, 10)
+    
+    # 裁剪信号（DeepONet需要flatten）
+    sig_cropped, kept_indices = cropper.crop_signal(sig_full, return_grid=False)
+    # sig_cropped: (9, 100)
+    
+    # 可视化掩码
+    mask = cropper.visualize_crop_pattern()  # (5, 5)
+    
+    # 创建图形
+    fig = plt.figure(figsize=(20, 10))
+    
+    # ===== 1. 原始 5×5 空间分布（某时刻）=====
+    ax1 = plt.subplot(2, 4, 1)
+    time_idx = 20
+    spatial_full = sig_full[:, :, time_idx]
+    spatial_full_interp = zoom(spatial_full, 8, order=1)
+    
+    im1 = ax1.imshow(spatial_full_interp, cmap='seismic',
+                     extent=[0, 100, 0, 100],
+                     origin='lower', aspect='equal', vmin=-1, vmax=1)
+    ax1.set_title('① Full Signal (5×5)\nat t=20μs', fontsize=12, fontweight='bold')
+    ax1.set_xlabel('x (mm)')
+    ax1.set_ylabel('y (mm)')
+    plt.colorbar(im1, ax=ax1, shrink=0.8)
+    
+    # 标记所有传感器
+    x_pos = np.linspace(0, 100, 5)
+    y_pos = np.linspace(0, 100, 5)
+    xv, yv = np.meshgrid(x_pos, y_pos)
+    ax1.plot(xv.flatten(), yv.flatten(), 'ko', markersize=8, alpha=0.6)
+    
+    # ===== 2. 裁剪掩码 =====
+    ax2 = plt.subplot(2, 4, 2)
+    im2 = ax2.imshow(mask, cmap='RdYlGn', vmin=0, vmax=1, origin='lower')
+    ax2.set_title(f'② Crop Mask\n({cropper.crop_position} mode)', fontsize=12, fontweight='bold')
+    
+    for y in range(5):
+        for x in range(5):
+            if mask[y, x] == 1:
+                ax2.plot(x, y, 'go', markersize=20)
+                ax2.text(x, y, '✓', ha='center', va='center',
+                        color='white', fontweight='bold', fontsize=14)
+            else:
+                ax2.plot(x, y, 'rx', markersize=15, markeredgewidth=3)
+                ax2.text(x, y, '✗', ha='center', va='center',
+                        color='darkred', fontweight='bold', fontsize=14)
+    
+    ax2.set_xticks(range(5))
+    ax2.set_yticks(range(5))
+    ax2.set_xlabel('x index')
+    ax2.set_ylabel('y index')
+    ax2.grid(True, alpha=0.3, linestyle='--')
+    plt.colorbar(im2, ax=ax2, shrink=0.8, label='Kept (1) / Removed (0)')
+    
+    # ===== 3. 裁剪后空间分布（重构到3×3）=====
+    ax3 = plt.subplot(2, 4, 3)
+    # 将裁剪后的信号重构回3×3网格
+    sig_cropped_grid = sig_cropped.reshape(3, 3, 100)
+    spatial_cropped = sig_cropped_grid[:, :, time_idx]
+    spatial_cropped_interp = zoom(spatial_cropped, 8, order=1)
+    
+    im3 = ax3.imshow(spatial_cropped_interp, cmap='seismic',
+                     extent=[0, 100, 0, 100],
+                     origin='lower', aspect='equal', vmin=-1, vmax=1)
+    ax3.set_title('③ Cropped Signal (3×3)\nat t=20μs', fontsize=12, fontweight='bold')
+    ax3.set_xlabel('x (mm)')
+    ax3.set_ylabel('y (mm)')
+    plt.colorbar(im3, ax=ax3, shrink=0.8)
+    
+    # 标记保留的传感器
+    x_kept = np.linspace(0, 100, 3)
+    y_kept = np.linspace(0, 100, 3)
+    xv_kept, yv_kept = np.meshgrid(x_kept, y_kept)
+    ax3.plot(xv_kept.flatten(), yv_kept.flatten(), 'go', markersize=8)
+    
+    # ===== 4. 目标损伤图（不变）=====
+    ax4 = plt.subplot(2, 4, 4)
+    im4 = ax4.imshow(img_target, cmap='hot', vmin=0, vmax=1,
+                     extent=[0, 100, 0, 100],
+                     origin='lower', aspect='equal')
+    ax4.set_title('④ Target (10×10)\n(Unchanged)', fontsize=12, fontweight='bold')
+    ax4.set_xlabel('x (mm)')
+    ax4.set_ylabel('y (mm)')
+    plt.colorbar(im4, ax=ax4, shrink=0.8, label='Probability')
+    
+    # ===== 5. 完整信号时域波形（选3个点）=====
+    ax5 = plt.subplot(2, 4, 5)
+    t_vec = np.linspace(0, 100, 100)
+    
+    # 选择3个保留点的波形
+    for i in range(min(3, len(kept_indices))):
+        y_idx, x_idx = kept_indices[i]
+        sig_point = sig_full[y_idx, x_idx, :]
+        ax5.plot(t_vec, sig_point, linewidth=1.2, 
+                label=f'Kept point ({x_idx},{y_idx})', alpha=0.8)
+    
+    ax5.set_xlabel('Time (μs)', fontsize=10)
+    ax5.set_ylabel('Amplitude', fontsize=10)
+    ax5.set_title('⑤ Time Signals (Kept Points)', fontsize=12, fontweight='bold')
+    ax5.grid(True, alpha=0.3)
+    ax5.legend(fontsize=9)
+    ax5.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.3)
+    
+    # ===== 6. 被移除点的波形（对比）=====
+    ax6 = plt.subplot(2, 4, 6)
+    
+    # 找出被移除的点
+    all_points = [(y, x) for y in range(5) for x in range(5)]
+    removed_indices = [pt for pt in all_points if pt not in kept_indices]
+    
+    for i in range(min(3, len(removed_indices))):
+        y_idx, x_idx = removed_indices[i]
+        sig_point = sig_full[y_idx, x_idx, :]
+        ax6.plot(t_vec, sig_point, linewidth=1.2, linestyle='--',
+                label=f'Removed ({x_idx},{y_idx})', alpha=0.7)
+    
+    ax6.set_xlabel('Time (μs)', fontsize=10)
+    ax6.set_ylabel('Amplitude', fontsize=10)
+    ax6.set_title('⑥ Time Signals (Removed Points)', fontsize=12, fontweight='bold')
+    ax6.grid(True, alpha=0.3)
+    ax6.legend(fontsize=9)
+    ax6.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.3)
+    
+    # ===== 7. DeepONet输入维度说明 =====
+    ax7 = plt.subplot(2, 4, 7)
+    ax7.axis('off')
+    
+    text_info = f"""
+    📊 DeepONet Input Transformation
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    🔵 Original Signal:
+       • Shape: (5, 5, 100)
+       • Total: 2500 time samples
+       • Branch input: 2500 dims
+    
+    ✂️ After Cropping:
+       • Shape: (3, 3, 100) → flatten
+       • Total: 900 time samples
+       • Branch input: 900 dims
+    
+    📉 Dimension Reduction:
+       2500 → 900 (36% retained)
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    🎯 Target (Unchanged):
+       • Shape: (10, 10)
+       • Total: 100 output points
+    
+    💡 Key Insight:
+       DeepONet must infer full damage
+       from incomplete observations!
+    """
+    
+    ax7.text(0.05, 0.5, text_info, fontsize=10, family='monospace',
+            verticalalignment='center', transform=ax7.transAxes)
+    
+    # ===== 8. 信号能量分布对比 =====
+    ax8 = plt.subplot(2, 4, 8)
+    
+    # 计算每个点的RMS能量
+    rms_full = np.sqrt(np.mean(sig_full**2, axis=2))  # (5, 5)
+    rms_cropped = np.sqrt(np.mean(sig_cropped_grid**2, axis=2))  # (3, 3)
+    
+    # 绘制热力图对比
+    rms_full_interp = zoom(rms_full, 4, order=1)
+    im8 = ax8.imshow(rms_full_interp, cmap='viridis',
+                     extent=[0, 100, 0, 100],
+                     origin='lower', aspect='equal')
+    
+    # 叠加裁剪区域框
+    if cropper.crop_position == 'center':
+        # 中心3×3对应的物理位置
+        rect_x = [20, 80, 80, 20, 20]
+        rect_y = [20, 20, 80, 80, 20]
+        ax8.plot(rect_x, rect_y, 'r-', linewidth=3, label='Kept region')
+    
+    ax8.set_title('⑧ RMS Energy Distribution\n(Full grid)', fontsize=12, fontweight='bold')
+    ax8.set_xlabel('x (mm)')
+    ax8.set_ylabel('y (mm)')
+    plt.colorbar(im8, ax=ax8, shrink=0.8, label='RMS Energy')
+    ax8.legend(fontsize=9)
+    
+    plt.suptitle(f'DeepONet Cropped Dataset Visualization (Sample {sample_idx})\n'
+                 f'Crop Mode: {cropper.crop_position} | Kept: 9/25 sensors (36%)',
+                 fontsize=16, fontweight='bold', y=0.98)
+    plt.tight_layout()
+    
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"✓ Visualization saved to {save_path}")
+    plt.close()
 
 
 def main():
@@ -35,16 +254,16 @@ def main():
     parser.add_argument(
         '--crop-mode',
         type=str,
-        default='square',  # 【修改】默认square模式
-        choices=['boundary', 'random', 'square'],  # 【新增】square选项
+        default='square',
+        choices=['boundary', 'random', 'square'],
         help='裁剪模式：boundary-边界点, random-随机点, square-正方形裁剪'
     )
     parser.add_argument(
         '--crop-position',
         type=str,
-        default='boundary',
+        default='center',  # 【修改】默认center（保留中心3×3）
         choices=['center', 'corner', 'boundary', 'random'],
-        help='square模式下的裁剪位置'
+        help='square模式下的裁剪位置：center-中心3×3, boundary-边界分散'
     )
     parser.add_argument(
         '--n-keep',
@@ -128,6 +347,15 @@ def main():
                 random_seed=42
             )
             config['branch_dim'] = dataset.get_branch_dim()
+            
+            # 【新增】可视化裁剪数据集
+            print("\n🎨 Generating cropped dataset visualization...")
+            visualize_cropped_dataset_deeponet(
+                raw_dataset, 
+                cropper, 
+                sample_idx=0,
+                save_path='images/deeponet_cropped_data_check.png'
+            )
         else:
             # 原有的boundary/random模式
             dataset, cropper = create_cropped_dataset(
@@ -243,8 +471,19 @@ def main():
         raw_dataset, 
         test_indices[0], 
         device,
-        cropper=cropper  # 【新增】传递裁剪器
+        cropper=cropper
     )
+    
+    # 【新增】如果使用了裁剪，再次可视化裁剪数据集（使用测试样本）
+    if config['use_crop'] and cropper is not None:
+        os.makedirs('images/dataset_check', exist_ok=True)
+        print("\n🎨 Generating final cropped dataset visualization (test sample)...")
+        visualize_cropped_dataset_deeponet(
+            raw_dataset,
+            cropper,
+            sample_idx=test_indices[0],
+            save_path='images/dataset_check/deeponet_cropped_test_sample.png'
+        )
     
     # ==================== 总结 ====================
     print("\n" + "=" * 70)

@@ -243,9 +243,9 @@ def visualize_3d_dataset():
     plt.tight_layout()
     
     # Create images directory if not exists
-    os.makedirs('images', exist_ok=True)
-    plt.savefig('images/dataset_3d_visualization.png', dpi=150, bbox_inches='tight')
-    print("✓ Visualization saved to images/dataset_3d_visualization.png")
+    os.makedirs('images/dataset_check', exist_ok=True)
+    plt.savefig('images/dataset_check/dataset_3d_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_check/dataset_3d_visualization.png")
     plt.show()
     
     print("✅ Visualization complete!\n")
@@ -365,9 +365,9 @@ def visualize_simple_dataset():
     plt.tight_layout()
     
     # 保存图像
-    os.makedirs('images', exist_ok=True)
-    plt.savefig('images/dataset_simple_visualization.png', dpi=150, bbox_inches='tight')
-    print("✓ Visualization saved to images/dataset_simple_visualization.png")
+    os.makedirs('images/dataset_check', exist_ok=True)
+    plt.savefig('images/dataset_check/dataset_simple_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_check/dataset_simple_visualization.png")
     plt.show()
     
     print("✅ Simple dataset visualization complete!\n")
@@ -496,9 +496,9 @@ def visualize_crop_pattern():
                  fontsize=16, fontweight='bold', y=1.02)
     plt.tight_layout()
     
-    os.makedirs('images', exist_ok=True)
-    plt.savefig('images/crop_pattern_visualization.png', dpi=150, bbox_inches='tight')
-    print("✓ Visualization saved to images/crop_pattern_visualization.png")
+    os.makedirs('images/dataset_check', exist_ok=True)
+    plt.savefig('images/dataset_check/crop_pattern_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_check/crop_pattern_visualization.png")
     plt.show()
     
     print("✅ Crop pattern visualization complete!\n")
@@ -646,9 +646,9 @@ def visualize_cropped_sample():
                  fontsize=16, fontweight='bold', y=0.98)
     plt.tight_layout()
     
-    os.makedirs('images', exist_ok=True)
-    plt.savefig('images/cropped_sample_visualization.png', dpi=150, bbox_inches='tight')
-    print("✓ Visualization saved to images/cropped_sample_visualization.png")
+    os.makedirs('images/dataset_check', exist_ok=True)
+    plt.savefig('images/dataset_check/cropped_sample_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_check/cropped_sample_visualization.png")
     plt.show()
     
     print("✅ Cropped sample visualization complete!\n")
