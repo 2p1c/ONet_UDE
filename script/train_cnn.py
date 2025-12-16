@@ -16,8 +16,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import torch.nn as nn
 import json
+import argparse  # 新增
 
 from data.dataset_simple import SimpleUSDataset3D
+from data.transform import create_square_cropped_dataset  # 新增
 from nn.cnn import SimpleCNN
 from utils.data_utils import prepare_cnn_dataloaders
 from utils.train_utils import train_model
@@ -88,8 +90,26 @@ def visualize_cnn_prediction(model, raw_dataset, sample_idx, device, save_path='
 
 def main():
     """主训练流程"""
+    # ==================== 解析命令行参数 ====================
+    parser = argparse.ArgumentParser(description='CNN Training')
+    parser.add_argument(
+        '--crop',
+        action='store_true',
+        help='使用裁剪数据集训练（3×3网格）'
+    )
+    parser.add_argument(
+        '--crop-position',
+        type=str,
+        default='boundary',
+        choices=['center', 'corner', 'boundary', 'random'],
+        help='裁剪位置'
+    )
+    args = parser.parse_args()
+    
     print("=" * 70)
     print("CNN Training - Simple 2D Convolutional Network")
+    if args.crop:
+        print(f"【裁剪模式】Position: {args.crop_position}")
     print("=" * 70)
     
     # ==================== 配置参数 ====================
@@ -143,13 +163,35 @@ def main():
         precompute=True
     )
     
-    print(f"✓ Dataset loaded: {len(raw_dataset)} samples")
-    print(f"  - Signal shape: ({config['ny']}, {config['nx']}, {config['sig_len']})")
-    print(f"  - Image shape: ({config['img_size']}, {config['img_size']})")
+    print(f"✓ Base dataset loaded: {len(raw_dataset)} samples")
+    
+    # 【新增】根据是否裁剪，包装数据集
+    cropper = None
+    input_size = config['nx']  # 默认5×5
+    
+    if args.crop:
+        print(f"\n🔪 Applying square crop transform...")
+        dataset, cropper = create_square_cropped_dataset(
+            raw_dataset,
+            crop_size=3,
+            crop_position=args.crop_position,
+            for_cnn=True,  # 保持网格格式
+            random_seed=42
+        )
+        input_size = 3  # 裁剪后3×3
+        print(f"✓ Cropped dataset created")
+    else:
+        dataset = raw_dataset
+        print(f"✓ Using full dataset (no crop)")
+    
+    print(f"\n✓ Dataset info:")
+    print(f"  - Samples: {len(dataset)}")
+    print(f"  - Input size: {input_size}×{input_size}×{config['sig_len']}")
+    print(f"  - Output size: {config['img_size']}×{config['img_size']}")
     
     # ==================== 准备数据加载器 ====================
     train_loader, test_loader, train_indices, test_indices = prepare_cnn_dataloaders(
-        raw_dataset,
+        dataset,
         train_ratio=config['train_ratio'],
         batch_size=config['batch_size']
     )
@@ -162,7 +204,8 @@ def main():
     model = SimpleCNN(
         input_channels=config['input_channels'],
         hidden_channels=config['hidden_channels'],
-        dropout=config['dropout']
+        dropout=config['dropout'],
+        input_size=input_size  # 【新增】传入输入尺寸
     ).to(device)
     
     # 打印模型信息
@@ -203,6 +246,10 @@ def main():
     print("\nSaving training configuration and metrics...")
     
     # 保存配置
+    config['use_crop'] = args.crop
+    config['crop_position'] = args.crop_position if args.crop else None
+    config['input_size'] = input_size
+    
     config_save_path = 'checkpoints/last_cnn_config.json'
     with open(config_save_path, 'w') as f:
         json.dump(config, f, indent=2)
@@ -240,11 +287,15 @@ def main():
     print("Training Summary")
     print("=" * 70)
     print(f"✓ Model: SimpleCNN")
+    print(f"✓ Input size: {input_size}×{input_size}")
     print(f"✓ Epochs: {len(train_losses)}")
     print(f"✓ Final train loss: {train_losses[-1]:.6f}")
     print(f"✓ Final test loss: {test_losses[-1]:.6f}")
     print(f"✓ Best test loss: {best_loss:.6f}")
-    print(f"✓ Model saved to: checkpoints/best_cnn_model.pth")
+    if args.crop:
+        print(f"✓ Training mode: Cropped ({args.crop_position})")
+    else:
+        print(f"✓ Training mode: Full")
     print("=" * 70)
     print("🎉 CNN Training completed!")
     print("=" * 70)

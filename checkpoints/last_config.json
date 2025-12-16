@@ -4,7 +4,7 @@
   "nx": 5,
   "ny": 5,
   "sig_len": 100,
-  "branch_dim": 2500,
+  "branch_dim": 900,
   "trunk_dim": 2,
   "branch_depth": 2,
   "trunk_depth": 3,
@@ -18,5 +18,8 @@
   "patience": 20,
   "use_scheduler": true,
   "scheduler_patience": 5,
-  "scheduler_factor": 0.5
+  "scheduler_factor": 0.5,
+  "use_crop": true,
+  "crop_mode": "square",
+  "n_keep": null
 }

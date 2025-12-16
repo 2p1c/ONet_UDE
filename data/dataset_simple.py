@@ -41,7 +41,7 @@ class SimpleUSDataset3D(Dataset):
         plate_size: float = 0.1,  # 板尺寸 0.1m (100mm)
         # 损伤参数
         min_defects: int = 1,
-        max_defects: int = 2,
+        max_defects: int = 5,
         defect_intensity_range: Tuple[float, float] = (0.3, 0.8),
         # 噪声
         noise_std: float = 0.02,  # 2% 噪声，保证高SNR
