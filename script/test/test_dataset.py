@@ -23,7 +23,8 @@ plt.rcParams['figure.max_open_warning'] = 50
 
 # Use correct import path
 from data.dataset import ToyUSDataset3D, batch_spectrogram_3d
-from data.dataset_simple import SimpleUSDataset3D  # 新增导入
+from data.dataset_simple import SimpleUSDataset3D
+from data.transform import create_cropped_dataset, SpatialCropper  # 新增导入
 
 
 def test_dataset_3d_basic():
@@ -242,9 +243,9 @@ def visualize_3d_dataset():
     plt.tight_layout()
     
     # Create images directory if not exists
-    os.makedirs('images', exist_ok=True)
-    plt.savefig('images/dataset_3d_visualization.png', dpi=150, bbox_inches='tight')
-    print("✓ Visualization saved to images/dataset_3d_visualization.png")
+    os.makedirs('images/dataset_check', exist_ok=True)
+    plt.savefig('images/dataset_check/dataset_3d_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_check/dataset_3d_visualization.png")
     plt.show()
     
     print("✅ Visualization complete!\n")
@@ -364,12 +365,293 @@ def visualize_simple_dataset():
     plt.tight_layout()
     
     # 保存图像
-    os.makedirs('images', exist_ok=True)
-    plt.savefig('images/dataset_simple_visualization.png', dpi=150, bbox_inches='tight')
-    print("✓ Visualization saved to images/dataset_simple_visualization.png")
+    os.makedirs('images/dataset_check', exist_ok=True)
+    plt.savefig('images/dataset_check/dataset_simple_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_check/dataset_simple_visualization.png")
     plt.show()
     
     print("✅ Simple dataset visualization complete!\n")
+
+
+def test_cropped_dataset():
+    """测试裁剪数据集功能"""
+    print("=" * 60)
+    print("Test: Cropped Dataset Functionality")
+    print("=" * 60)
+    
+    # 创建原始数据集
+    base_dataset = SimpleUSDataset3D(
+        n_samples=10,
+        nx=5,
+        ny=5,
+        sig_len=100,
+        img_size=10,
+        precompute=True
+    )
+    
+    # 测试边界模式
+    print("\n--- Testing boundary mode ---")
+    cropped_dataset, cropper = create_cropped_dataset(
+        base_dataset,
+        crop_mode='boundary',
+        random_per_sample=False
+    )
+    
+    sig_cropped, img = cropped_dataset[0]
+    print(f"✓ Cropped signal shape: {sig_cropped.shape}")
+    print(f"✓ Image shape (unchanged): {img.shape}")
+    print(f"✓ Branch dim: {cropped_dataset.get_branch_dim()}")
+    
+    assert sig_cropped.shape[0] == 16, "Boundary mode should keep 16 points"
+    assert sig_cropped.shape[1] == 100, "Time steps unchanged"
+    assert img.shape == (10, 10), "Image shape unchanged"
+    
+    # 测试随机模式
+    print("\n--- Testing random mode ---")
+    cropped_dataset_rand, cropper_rand = create_cropped_dataset(
+        base_dataset,
+        crop_mode='random',
+        n_keep=12,
+        random_per_sample=True,
+        random_seed=42
+    )
+    
+    sig_rand, _ = cropped_dataset_rand[0]
+    print(f"✓ Random cropped signal shape: {sig_rand.shape}")
+    assert sig_rand.shape[0] == 12, "Should keep 12 points"
+    
+    print("\n✅ Cropped dataset test passed!\n")
+
+
+def visualize_crop_pattern():
+    """可视化裁剪模式"""
+    print("=" * 60)
+    print("Visualization: Crop Pattern")
+    print("=" * 60)
+    
+    # 创建裁剪器
+    cropper_boundary = SpatialCropper(
+        nx=5, ny=5, sig_len=100,
+        crop_mode='boundary'
+    )
+    
+    cropper_random = SpatialCropper(
+        nx=5, ny=5, sig_len=100,
+        crop_mode='random',
+        n_keep=12,
+        random_seed=42
+    )
+    
+    # 生成掩码
+    mask_boundary = cropper_boundary.visualize_crop_pattern()
+    mask_random = cropper_random.visualize_crop_pattern()
+    
+    # 可视化
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # 边界模式
+    ax1 = axes[0]
+    im1 = ax1.imshow(mask_boundary, cmap='RdYlGn', vmin=0, vmax=1)
+    ax1.set_title('Boundary Mode (16 sensors)', fontsize=14, fontweight='bold')
+    ax1.set_xlabel('x index')
+    ax1.set_ylabel('y index')
+    
+    # 标注保留点
+    for y in range(5):
+        for x in range(5):
+            if mask_boundary[y, x] == 1:
+                ax1.plot(x, y, 'go', markersize=15)
+                ax1.text(x, y, '✓', ha='center', va='center', 
+                        color='white', fontweight='bold', fontsize=12)
+            else:
+                ax1.plot(x, y, 'rx', markersize=12, markeredgewidth=2)
+    
+    ax1.set_xticks(range(5))
+    ax1.set_yticks(range(5))
+    ax1.grid(True, alpha=0.3)
+    plt.colorbar(im1, ax=ax1, label='Kept (1) / Removed (0)')
+    
+    # 随机模式
+    ax2 = axes[1]
+    im2 = ax2.imshow(mask_random, cmap='RdYlGn', vmin=0, vmax=1)
+    ax2.set_title('Random Mode (12 sensors)', fontsize=14, fontweight='bold')
+    ax2.set_xlabel('x index')
+    ax2.set_ylabel('y index')
+    
+    for y in range(5):
+        for x in range(5):
+            if mask_random[y, x] == 1:
+                ax2.plot(x, y, 'go', markersize=15)
+                ax2.text(x, y, '✓', ha='center', va='center',
+                        color='white', fontweight='bold', fontsize=12)
+            else:
+                ax2.plot(x, y, 'rx', markersize=12, markeredgewidth=2)
+    
+    ax2.set_xticks(range(5))
+    ax2.set_yticks(range(5))
+    ax2.grid(True, alpha=0.3)
+    plt.colorbar(im2, ax=ax2, label='Kept (1) / Removed (0)')
+    
+    plt.suptitle('Spatial Cropping Patterns for DeepONet', 
+                 fontsize=16, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    
+    os.makedirs('images/dataset_check', exist_ok=True)
+    plt.savefig('images/dataset_check/crop_pattern_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_check/crop_pattern_visualization.png")
+    plt.show()
+    
+    print("✅ Crop pattern visualization complete!\n")
+
+
+def visualize_cropped_sample():
+    """可视化裁剪前后的信号对比"""
+    print("=" * 60)
+    print("Visualization: Before/After Cropping")
+    print("=" * 60)
+    
+    # 创建数据集
+    base_dataset = SimpleUSDataset3D(
+        n_samples=1,
+        nx=5, ny=5, sig_len=100,
+        img_size=10,
+        precompute=True
+    )
+    
+    cropped_dataset, cropper = create_cropped_dataset(
+        base_dataset,
+        crop_mode='boundary',
+        random_per_sample=False
+    )
+    
+    # 获取数据
+    sig_full, img = base_dataset[0]  # (5, 5, 100)
+    sig_cropped, _ = cropped_dataset[0]  # (16, 100)
+    
+    # 创建图形
+    fig = plt.figure(figsize=(18, 10))
+    
+    # === 1. 完整信号（某时刻空间分布）===
+    ax1 = plt.subplot(2, 3, 1)
+    time_idx = 20
+    spatial_full = sig_full[:, :, time_idx]
+    
+    from scipy.ndimage import zoom
+    spatial_full_interp = zoom(spatial_full, 8, order=1)
+    
+    im1 = ax1.imshow(spatial_full_interp, cmap='seismic',
+                     extent=[0, 100, 0, 100],
+                     origin='lower', aspect='equal', vmin=-1, vmax=1)
+    ax1.set_title('Full Signal (5×5 sensors)', fontsize=12, fontweight='bold')
+    ax1.set_xlabel('x (mm)')
+    ax1.set_ylabel('y (mm)')
+    plt.colorbar(im1, ax=ax1, shrink=0.8)
+    
+    # 标记所有传感器
+    x_pos = np.linspace(0, 100, 5)
+    y_pos = np.linspace(0, 100, 5)
+    xv, yv = np.meshgrid(x_pos, y_pos)
+    ax1.plot(xv.flatten(), yv.flatten(), 'ko', markersize=6, label='All sensors')
+    ax1.legend(fontsize=9)
+    
+    # === 2. 裁剪模式掩码 ===
+    ax2 = plt.subplot(2, 3, 2)
+    mask = cropper.visualize_crop_pattern()
+    im2 = ax2.imshow(mask, cmap='RdYlGn', vmin=0, vmax=1)
+    ax2.set_title('Crop Pattern (16 boundary sensors)', fontsize=12, fontweight='bold')
+    
+    for y in range(5):
+        for x in range(5):
+            if mask[y, x] == 1:
+                ax2.plot(x, y, 'go', markersize=12)
+            else:
+                ax2.plot(x, y, 'rx', markersize=10)
+    
+    ax2.set_xticks(range(5))
+    ax2.set_yticks(range(5))
+    ax2.grid(True, alpha=0.3)
+    plt.colorbar(im2, ax=ax2, shrink=0.8)
+    
+    # === 3. 损伤图（目标不变）===
+    ax3 = plt.subplot(2, 3, 3)
+    im3 = ax3.imshow(img, cmap='hot', vmin=0, vmax=1,
+                     extent=[0, 100, 0, 100],
+                     origin='lower', aspect='equal')
+    ax3.set_title('Target (unchanged)', fontsize=12, fontweight='bold')
+    ax3.set_xlabel('x (mm)')
+    ax3.set_ylabel('y (mm)')
+    plt.colorbar(im3, ax=ax3, shrink=0.8)
+    
+    # === 4. 完整信号时域波形（中心点）===
+    ax4 = plt.subplot(2, 3, 4)
+    t_vec = np.linspace(0, 100, 100)  # 假设100μs
+    center_sig = sig_full[2, 2, :]
+    ax4.plot(t_vec, center_sig, linewidth=1.2, label='Center (2,2)')
+    ax4.set_xlabel('Time (μs)')
+    ax4.set_ylabel('Amplitude')
+    ax4.set_title('Full Signal - Center Point', fontsize=12, fontweight='bold')
+    ax4.grid(True, alpha=0.3)
+    ax4.legend()
+    
+    # === 5. 裁剪信号时域波形（选择几个边界点）===
+    ax5 = plt.subplot(2, 3, 5)
+    kept_indices = cropper.boundary_indices
+    
+    # 绘制前4个边界点
+    for i in range(min(4, len(kept_indices))):
+        y_idx, x_idx = kept_indices[i]
+        original_sig = sig_full[y_idx, x_idx, :]
+        ax5.plot(t_vec, original_sig, linewidth=1.0, 
+                label=f'Boundary ({x_idx},{y_idx})', alpha=0.8)
+    
+    ax5.set_xlabel('Time (μs)')
+    ax5.set_ylabel('Amplitude')
+    ax5.set_title('Cropped Signals - Boundary Points', fontsize=12, fontweight='bold')
+    ax5.grid(True, alpha=0.3)
+    ax5.legend(fontsize=8)
+    
+    # === 6. 维度对比 ===
+    ax6 = plt.subplot(2, 3, 6)
+    ax6.axis('off')
+    
+    text_info = f"""
+    📊 Dimension Comparison
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    🔵 Full Dataset:
+       • Signal shape: (5, 5, 100)
+       • Flattened: {5*5*100} dims
+       • Branch input: {5*5*100}
+    
+    🔪 Cropped Dataset:
+       • Signal shape: (16, 100)
+       • Flattened: {16*100} dims
+       • Branch input: {16*100}
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    📉 Dimension reduction:
+       {5*5*100} → {16*100}
+       ({16*100/2500*100:.1f}% of original)
+    
+    ✅ Target unchanged:
+       (10, 10) = 100 output points
+    """
+    
+    ax6.text(0.1, 0.5, text_info, fontsize=11, family='monospace',
+            verticalalignment='center', transform=ax6.transAxes)
+    
+    plt.suptitle('Spatial Cropping: Input Reduction with Unchanged Target', 
+                 fontsize=16, fontweight='bold', y=0.98)
+    plt.tight_layout()
+    
+    os.makedirs('images/dataset_check', exist_ok=True)
+    plt.savefig('images/dataset_check/cropped_sample_visualization.png', dpi=150, bbox_inches='tight')
+    print("✓ Visualization saved to images/dataset_check/cropped_sample_visualization.png")
+    plt.show()
+    
+    print("✅ Cropped sample visualization complete!\n")
 
 
 def run_all_tests():
@@ -385,9 +667,14 @@ def run_all_tests():
         # Visualization test
         visualize_3d_dataset()
         
-        # 【新增】简化数据集测试
+        # 简化数据集测试
         test_simple_dataset_basic()
         visualize_simple_dataset()
+        
+        # 【新增】裁剪功能测试
+        test_cropped_dataset()
+        visualize_crop_pattern()
+        visualize_cropped_sample()
         
         print("=" * 60)
         print("🎉 All tests passed! 3D dataset integration successful!")

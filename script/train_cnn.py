@@ -16,80 +16,68 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import torch.nn as nn
 import json
+import argparse
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.ndimage import zoom
 
 from data.dataset_simple import SimpleUSDataset3D
+from data.transform import (
+    create_square_cropped_dataset, 
+    create_damage_aware_dataset,
+    create_subgrid_dataset  # 【新增】
+)
 from nn.cnn import SimpleCNN
 from utils.data_utils import prepare_cnn_dataloaders
 from utils.train_utils import train_model
-from utils.visualization import plot_loss_curves, visualize_prediction
-
-
-def visualize_cnn_prediction(model, raw_dataset, sample_idx, device, save_path='images/cnn_prediction.png'):
-    """
-    CNN专用可视化函数
-    
-    Args:
-        model: CNN模型
-        raw_dataset: 原始数据集
-        sample_idx: 样本索引
-        device: 设备
-        save_path: 保存路径
-    """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    
-    model.eval()
-    
-    # 获取原始样本
-    sig, img_true = raw_dataset[sample_idx]  # (5, 5, 100), (10, 10)
-    
-    # 转换为CNN输入格式
-    sig_cnn = np.transpose(sig, (2, 0, 1))  # (100, 5, 5)
-    sig_tensor = torch.from_numpy(sig_cnn).unsqueeze(0).to(device)  # (1, 100, 5, 5)
-    
-    # 预测
-    with torch.no_grad():
-        pred = model(sig_tensor)  # (1, 1, 10, 10)
-        img_pred = pred.squeeze().cpu().numpy()  # (10, 10)
-    
-    # 绘图
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    
-    # 真实损伤图
-    im0 = axes[0].imshow(img_true, cmap='hot', vmin=0, vmax=1, origin='lower')
-    axes[0].set_title('Ground Truth', fontsize=12, fontweight='bold')
-    axes[0].set_xlabel('x')
-    axes[0].set_ylabel('y')
-    plt.colorbar(im0, ax=axes[0], label='Probability')
-    
-    # 预测损伤图
-    im1 = axes[1].imshow(img_pred, cmap='hot', vmin=0, vmax=1, origin='lower')
-    axes[1].set_title('CNN Prediction', fontsize=12, fontweight='bold')
-    axes[1].set_xlabel('x')
-    axes[1].set_ylabel('y')
-    plt.colorbar(im1, ax=axes[1], label='Probability')
-    
-    # 误差图
-    error = np.abs(img_pred - img_true)
-    im2 = axes[2].imshow(error, cmap='viridis', vmin=0, vmax=0.5, origin='lower')
-    axes[2].set_title(f'Absolute Error (MAE={error.mean():.4f})', fontsize=12, fontweight='bold')
-    axes[2].set_xlabel('x')
-    axes[2].set_ylabel('y')
-    plt.colorbar(im2, ax=axes[2], label='|Error|')
-    
-    plt.suptitle(f'CNN Prediction (Sample {sample_idx})', fontsize=14, fontweight='bold')
-    plt.tight_layout()
-    
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"✓ Prediction visualization saved to {save_path}")
-    plt.close()
+from utils.visualization import (
+    plot_loss_curves,
+    visualize_cnn_prediction,
+    visualize_cropped_dataset_cnn  # 【新增】导入
+)
 
 
 def main():
     """主训练流程"""
+    # ==================== 解析命令行参数 ====================
+    parser = argparse.ArgumentParser(description='CNN Training')
+    parser.add_argument(
+        '--crop',
+        action='store_true',
+        help='使用裁剪数据集训练（3×3网格）'
+    )
+    parser.add_argument(
+        '--crop-position',
+        type=str,
+        default='center',
+        choices=['center', 'corner', 'boundary', 'random', 'damage_aware'],  # 【新增】
+        help='裁剪位置：center-中心3×3, boundary-边界分散, damage_aware-基于损伤'
+    )
+    parser.add_argument(
+        '--damage-threshold',
+        type=float,
+        default=0.3,
+        help='damage_aware模式下的损伤阈值'
+    )
+    parser.add_argument(
+        '--min-keep',
+        type=int,
+        default=4,
+        help='damage_aware模式下最少保留的传感器数'
+    )
+    parser.add_argument(
+        '--use-subgrid',
+        action='store_true',
+        help='使用子网格训练模式（10×10→5×5）'
+    )
+    args = parser.parse_args()
+    
     print("=" * 70)
     print("CNN Training - Simple 2D Convolutional Network")
+    if args.crop:
+        print(f"【裁剪模式】Position: {args.crop_position}")
+    if args.use_subgrid:
+        print("【子网格模式】启用")
     print("=" * 70)
     
     # ==================== 配置参数 ====================
@@ -134,22 +122,93 @@ def main():
     print("Loading Dataset...")
     print("=" * 70)
     
+    # 【修改】根据是否使用子网格，调整网格尺寸
+    grid_nx = 10 if args.use_subgrid else config['nx']
+    grid_ny = 10 if args.use_subgrid else config['ny']
+    
     raw_dataset = SimpleUSDataset3D(
         n_samples=config['n_samples'],
-        nx=config['nx'],
-        ny=config['ny'],
+        nx=grid_nx,
+        ny=grid_ny,
         sig_len=config['sig_len'],
         img_size=config['img_size'],
         precompute=True
     )
     
-    print(f"✓ Dataset loaded: {len(raw_dataset)} samples")
-    print(f"  - Signal shape: ({config['ny']}, {config['nx']}, {config['sig_len']})")
-    print(f"  - Image shape: ({config['img_size']}, {config['img_size']})")
+    print(f"✓ Base dataset loaded: {len(raw_dataset)} samples")
+    
+    # 【新增】处理子网格裁剪
+    cropper = None
+    input_size = config['nx']
+    
+    if args.use_subgrid:
+        print(f"\n🔪 Applying subgrid crop (10×10 → 5×5)...")
+        dataset, cropper = create_subgrid_dataset(
+            raw_dataset,
+            sub_nx=5,
+            sub_ny=5,
+            position='center',
+            for_cnn=True,  # CNN需要网格格式
+            crop_target=True,  # 训练时裁剪目标
+            random_seed=42
+        )
+        input_size = 5
+        config['use_subgrid'] = True
+        print(f"✓ Subgrid dataset created for CNN")
+    elif args.crop:
+        if args.crop_position == 'damage_aware':
+            # 【新增】基于损伤的裁剪
+            dataset, cropper = create_damage_aware_dataset(
+                raw_dataset,
+                damage_threshold=args.damage_threshold,
+                min_keep=args.min_keep,
+                for_cnn=True,  # CNN需要网格格式
+                random_seed=42
+            )
+            input_size = config['nx']  # 保持5×5，但部分位置为0
+            config['damage_threshold'] = args.damage_threshold
+            config['min_keep'] = args.min_keep
+            
+            # 可视化损伤映射
+            print("\n🎨 Generating damage mapping visualization...")
+            sample_sig, sample_img = raw_dataset[0]
+            cropper.visualize_damage_mapping(
+                sample_img,
+                save_path='images/dataset_check/cnn_damage_mapping.png'
+            )
+            print(f"✓ Damage-aware dataset created for CNN")
+        else:
+            # 原有的正方形裁剪
+            dataset, cropper = create_square_cropped_dataset(
+                raw_dataset,
+                crop_size=3,
+                crop_position=args.crop_position,
+                for_cnn=True,
+                random_seed=42
+            )
+            input_size = 3
+            print(f"✓ Cropped dataset created")
+            
+            # 【修改】调用utils.visualization中的函数
+            print("\n🎨 Generating cropped dataset visualization...")
+            visualize_cropped_dataset_cnn(
+                raw_dataset,
+                cropper,
+                sample_idx=0,
+                save_path='images/dataset_check/cnn_cropped_data.png'
+            )
+    else:
+        dataset = raw_dataset
+        print(f"✓ Using full dataset (no crop)")
+    
+    print(f"\n✓ Dataset info:")
+    print(f"  - Samples: {len(dataset)}")
+    print(f"  - Input size: {input_size}×{input_size}×{config['sig_len']}")
+    print(f"  - Output size: {config['img_size']}×{config['img_size']}")
     
     # ==================== 准备数据加载器 ====================
     train_loader, test_loader, train_indices, test_indices = prepare_cnn_dataloaders(
-        raw_dataset,
+        dataset,
         train_ratio=config['train_ratio'],
         batch_size=config['batch_size']
     )
@@ -162,7 +221,8 @@ def main():
     model = SimpleCNN(
         input_channels=config['input_channels'],
         hidden_channels=config['hidden_channels'],
-        dropout=config['dropout']
+        dropout=config['dropout'],
+        input_size=input_size  # 【新增】传入输入尺寸
     ).to(device)
     
     # 打印模型信息
@@ -203,6 +263,10 @@ def main():
     print("\nSaving training configuration and metrics...")
     
     # 保存配置
+    config['use_crop'] = args.crop
+    config['crop_position'] = args.crop_position if args.crop else None
+    config['input_size'] = input_size
+    
     config_save_path = 'checkpoints/last_cnn_config.json'
     with open(config_save_path, 'w') as f:
         json.dump(config, f, indent=2)
@@ -231,20 +295,45 @@ def main():
     # 绘制损失曲线
     plot_loss_curves(train_losses, test_losses, save_path='images/cnn_loss_curve.png')
     
-    # 加载最佳模型并预测
+    # 【修改】加载最佳模型并预测，传递cropper
     model.load_state_dict(torch.load('checkpoints/best_cnn_model.pth'))
-    visualize_cnn_prediction(model, raw_dataset, test_indices[0], device)
+    
+    # 【关键修复】传递cropper给可视化函数
+    visualize_cnn_prediction(
+        model, 
+        raw_dataset,  # 使用原始数据集
+        test_indices[0], 
+        device,
+        save_path='images/cnn_prediction.png',
+        cropper=cropper  # 【新增】传递裁剪器
+    )
+    
+    # 如果使用了裁剪，再次可视化（测试样本）
+    if args.crop and cropper is not None:
+        print("\n🎨 Generating final cropped dataset visualization (test sample)...")
+        visualize_cropped_dataset_cnn(
+            raw_dataset,
+            cropper,
+            sample_idx=test_indices[0],
+            save_path='images/dataset_check/cnn_cropped_test.png'
+        )
     
     # ==================== 总结 ====================
     print("\n" + "=" * 70)
     print("Training Summary")
     print("=" * 70)
     print(f"✓ Model: SimpleCNN")
+    print(f"✓ Input size: {input_size}×{input_size}")
     print(f"✓ Epochs: {len(train_losses)}")
     print(f"✓ Final train loss: {train_losses[-1]:.6f}")
     print(f"✓ Final test loss: {test_losses[-1]:.6f}")
     print(f"✓ Best test loss: {best_loss:.6f}")
-    print(f"✓ Model saved to: checkpoints/best_cnn_model.pth")
+    if args.crop:
+        print(f"✓ Training mode: Cropped ({args.crop_position})")
+    elif args.use_subgrid:
+        print(f"✓ Training mode: Subgrid")
+    else:
+        print(f"✓ Training mode: Full")
     print("=" * 70)
     print("🎉 CNN Training completed!")
     print("=" * 70)
