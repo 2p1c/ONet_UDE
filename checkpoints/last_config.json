@@ -4,7 +4,7 @@
   "nx": 5,
   "ny": 5,
   "sig_len": 100,
-  "branch_dim": 900,
+  "branch_dim": 2500,
   "trunk_dim": 2,
   "branch_depth": 2,
   "trunk_depth": 3,
@@ -19,7 +19,9 @@
   "use_scheduler": true,
   "scheduler_patience": 5,
   "scheduler_factor": 0.5,
-  "use_crop": true,
+  "use_crop": false,
   "crop_mode": "square",
-  "n_keep": null
+  "n_keep": null,
+  "use_subgrid": false,
+  "no_crop_input": false
 }

@@ -17,7 +17,7 @@
   "use_scheduler": true,
   "scheduler_patience": 5,
   "scheduler_factor": 0.5,
-  "use_crop": true,
-  "crop_position": "center",
-  "input_size": 3
+  "use_crop": false,
+  "crop_position": null,
+  "input_size": 5
 }

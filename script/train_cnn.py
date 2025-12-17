@@ -22,7 +22,11 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import zoom
 
 from data.dataset_simple import SimpleUSDataset3D
-from data.transform import create_square_cropped_dataset  # 新增
+from data.transform import (
+    create_square_cropped_dataset, 
+    create_damage_aware_dataset,
+    create_subgrid_dataset  # 【新增】
+)
 from nn.cnn import SimpleCNN
 from utils.data_utils import prepare_cnn_dataloaders
 from utils.train_utils import train_model
@@ -45,9 +49,26 @@ def main():
     parser.add_argument(
         '--crop-position',
         type=str,
-        default='center',  # 【修改】默认center
-        choices=['center', 'corner', 'boundary', 'random'],
-        help='裁剪位置：center-中心3×3, boundary-边界分散'
+        default='center',
+        choices=['center', 'corner', 'boundary', 'random', 'damage_aware'],  # 【新增】
+        help='裁剪位置：center-中心3×3, boundary-边界分散, damage_aware-基于损伤'
+    )
+    parser.add_argument(
+        '--damage-threshold',
+        type=float,
+        default=0.3,
+        help='damage_aware模式下的损伤阈值'
+    )
+    parser.add_argument(
+        '--min-keep',
+        type=int,
+        default=4,
+        help='damage_aware模式下最少保留的传感器数'
+    )
+    parser.add_argument(
+        '--use-subgrid',
+        action='store_true',
+        help='使用子网格训练模式（10×10→5×5）'
     )
     args = parser.parse_args()
     
@@ -55,6 +76,8 @@ def main():
     print("CNN Training - Simple 2D Convolutional Network")
     if args.crop:
         print(f"【裁剪模式】Position: {args.crop_position}")
+    if args.use_subgrid:
+        print("【子网格模式】启用")
     print("=" * 70)
     
     # ==================== 配置参数 ====================
@@ -99,10 +122,14 @@ def main():
     print("Loading Dataset...")
     print("=" * 70)
     
+    # 【修改】根据是否使用子网格，调整网格尺寸
+    grid_nx = 10 if args.use_subgrid else config['nx']
+    grid_ny = 10 if args.use_subgrid else config['ny']
+    
     raw_dataset = SimpleUSDataset3D(
         n_samples=config['n_samples'],
-        nx=config['nx'],
-        ny=config['ny'],
+        nx=grid_nx,
+        ny=grid_ny,
         sig_len=config['sig_len'],
         img_size=config['img_size'],
         precompute=True
@@ -110,30 +137,66 @@ def main():
     
     print(f"✓ Base dataset loaded: {len(raw_dataset)} samples")
     
-    # 【修改】根据是否裁剪，包装数据集
+    # 【新增】处理子网格裁剪
     cropper = None
     input_size = config['nx']
     
-    if args.crop:
-        print(f"\n🔪 Applying square crop transform...")
-        dataset, cropper = create_square_cropped_dataset(
+    if args.use_subgrid:
+        print(f"\n🔪 Applying subgrid crop (10×10 → 5×5)...")
+        dataset, cropper = create_subgrid_dataset(
             raw_dataset,
-            crop_size=3,
-            crop_position=args.crop_position,
-            for_cnn=True,
+            sub_nx=5,
+            sub_ny=5,
+            position='center',
+            for_cnn=True,  # CNN需要网格格式
+            crop_target=True,  # 训练时裁剪目标
             random_seed=42
         )
-        input_size = 3
-        print(f"✓ Cropped dataset created")
-        
-        # 【修改】调用utils.visualization中的函数
-        print("\n🎨 Generating cropped dataset visualization...")
-        visualize_cropped_dataset_cnn(
-            raw_dataset,
-            cropper,
-            sample_idx=0,
-            save_path='images/dataset_check/cnn_cropped_data.png'
-        )
+        input_size = 5
+        config['use_subgrid'] = True
+        print(f"✓ Subgrid dataset created for CNN")
+    elif args.crop:
+        if args.crop_position == 'damage_aware':
+            # 【新增】基于损伤的裁剪
+            dataset, cropper = create_damage_aware_dataset(
+                raw_dataset,
+                damage_threshold=args.damage_threshold,
+                min_keep=args.min_keep,
+                for_cnn=True,  # CNN需要网格格式
+                random_seed=42
+            )
+            input_size = config['nx']  # 保持5×5，但部分位置为0
+            config['damage_threshold'] = args.damage_threshold
+            config['min_keep'] = args.min_keep
+            
+            # 可视化损伤映射
+            print("\n🎨 Generating damage mapping visualization...")
+            sample_sig, sample_img = raw_dataset[0]
+            cropper.visualize_damage_mapping(
+                sample_img,
+                save_path='images/dataset_check/cnn_damage_mapping.png'
+            )
+            print(f"✓ Damage-aware dataset created for CNN")
+        else:
+            # 原有的正方形裁剪
+            dataset, cropper = create_square_cropped_dataset(
+                raw_dataset,
+                crop_size=3,
+                crop_position=args.crop_position,
+                for_cnn=True,
+                random_seed=42
+            )
+            input_size = 3
+            print(f"✓ Cropped dataset created")
+            
+            # 【修改】调用utils.visualization中的函数
+            print("\n🎨 Generating cropped dataset visualization...")
+            visualize_cropped_dataset_cnn(
+                raw_dataset,
+                cropper,
+                sample_idx=0,
+                save_path='images/dataset_check/cnn_cropped_data.png'
+            )
     else:
         dataset = raw_dataset
         print(f"✓ Using full dataset (no crop)")
@@ -267,6 +330,8 @@ def main():
     print(f"✓ Best test loss: {best_loss:.6f}")
     if args.crop:
         print(f"✓ Training mode: Cropped ({args.crop_position})")
+    elif args.use_subgrid:
+        print(f"✓ Training mode: Subgrid")
     else:
         print(f"✓ Training mode: Full")
     print("=" * 70)

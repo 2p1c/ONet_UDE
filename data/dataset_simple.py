@@ -29,10 +29,10 @@ class SimpleUSDataset3D(Dataset):
     def __init__(
         self,
         n_samples: int = 1000,
-        nx: int = 5,  # 空间网格x方向
-        ny: int = 5,  # 空间网格y方向
-        sig_len: int = 100,  # 时间步数
-        img_size: int = 10,  # 损伤图尺寸
+        nx: int = 5,
+        ny: int = 5,
+        sig_len: int = 100,
+        img_size: int = 10,  # 【可修改为20】
         # 物理参数
         T: float = 0.0001,  # 时间窗口 100us
         f0: float = 200e3,  # 中心频率 200kHz
@@ -47,6 +47,8 @@ class SimpleUSDataset3D(Dataset):
         noise_std: float = 0.02,  # 2% 噪声，保证高SNR
         # 激励位置 (归一化坐标 0-1)
         source_pos: Tuple[float, float] = (1.3, 1.3),  # 中心激励
+        # 【新增】损伤分布范围
+        defect_range: Tuple[float, float] = (0.2, 0.8),  # 【修改】可扩展到(0.0, 1.0)
         precompute: bool = True,
     ):
         self.n_samples = n_samples
@@ -68,6 +70,7 @@ class SimpleUSDataset3D(Dataset):
         self.min_defects = min_defects
         self.max_defects = max_defects
         self.defect_intensity_range = defect_intensity_range
+        self.defect_range = defect_range  # 【新增】保存损伤范围
 
         # 噪声
         self.noise_std = noise_std
@@ -80,6 +83,9 @@ class SimpleUSDataset3D(Dataset):
         xs = np.linspace(0, self.L, self.nx)
         ys = np.linspace(0, self.L, self.ny)
         self.xv, self.yv = np.meshgrid(xs, ys, indexing="xy")
+
+        # 【新增】记录是否使用大网格
+        self.use_large_grid = (nx == 10 and ny == 10)
 
         # 预计算
         self.precompute = precompute
@@ -108,8 +114,9 @@ class SimpleUSDataset3D(Dataset):
         n_defects = random.randint(self.min_defects, self.max_defects)
         defects = []
         for _ in range(n_defects):
-            x_norm = random.uniform(0.2, 0.8)
-            y_norm = random.uniform(0.2, 0.8)
+            # 【修改】使用可配置的损伤范围
+            x_norm = random.uniform(*self.defect_range)  # 【修改】
+            y_norm = random.uniform(*self.defect_range)  # 【修改】
             intensity = random.uniform(*self.defect_intensity_range)
             defects.append({"x": x_norm, "y": y_norm, "intensity": intensity})
 
